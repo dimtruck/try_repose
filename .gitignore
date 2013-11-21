@@ -1,0 +1,10 @@
+repose_home/*
+include/*
+imported_configs/**
+target/*
+try_repose.iml
+bin/*
+lib/*
+usr/*
+.Python
+.idea/*
