@@ -97,22 +97,23 @@ class Repose {
             )
             filters ([])
         }
+        println System.getProperty("user.dir");
         try{
             //#2
             repose.retrieveFilterList();
             //#3
             for(Filter filter : repose.retrieveFilterList()){
-                new File("/Users/dimi5963/projects/try_repose/repose_home/configs").eachFile {
+                new File("${System.getProperty("user.dir")}/repose_home/configs").eachFile {
                     it.delete()
                 }
 
                 //#4 - to set up configuration, you need the following:
                 //container.cfg.xml
                 FileUtils.copyDirectory(
-                        new File("/Users/dimi5963/projects/try_repose/common_configs"),
-                        new File("/Users/dimi5963/projects/try_repose/repose_home/configs"))
+                        new File("${System.getProperty("user.dir")}/common_configs"),
+                        new File("${System.getProperty("user.dir")}/repose_home/configs"))
                 File systemModel = new File(
-                        "/Users/dimi5963/projects/try_repose/repose_home/configs/system-model.cfg.xml")
+                        "${System.getProperty("user.dir")}/repose_home/configs/system-model.cfg.xml")
                 systemModel << '<?xml version="1.0" encoding="UTF-8"?>\n' +
                         '\n' +
                         '<!-- To configure Repose see: http://wiki.openrepose.org/display/REPOSE/Configuration -->\n' +
@@ -142,22 +143,19 @@ class Repose {
                         '  </repose-cluster>\n' +
                         '</system-model>'
 
-                println "filter name: ${filter.name}"
-                println "repose configuration map: ${repose.configurationMap}"
-
-                File filterFile = new File("/Users/dimi5963/projects/try_repose/imported_configs/").listFiles().find {
+                File filterFile = new File("${System.getProperty("user.dir")}/imported_configs/").listFiles().find {
                     repose.configurationMap[filter.name] == it.name
                 }
 
                 FileUtils.copyFile(
                         filterFile,
-                        new File("/Users/dimi5963/projects/try_repose/repose_home/configs/${repose.configurationMap[filter.name]}"))
+                        new File("${System.getProperty("user.dir")}/repose_home/configs/${repose.configurationMap[filter.name]}"))
 
                 //#5
                 Deproxy deproxy = new Deproxy()
                 deproxy.addEndpoint(10001)
 
-                def cmd = """java -jar /Users/dimi5963/projects/try_repose/usr/share/repose/repose-valve.jar -c /Users/dimi5963/projects/try_repose/repose_home/configs/ -s 7777 start"""
+                def cmd = """java -jar ${System.getProperty("user.dir")}/usr/share/repose/repose-valve.jar -c ${System.getProperty("user.dir")}/repose_home/configs/ -s 7777 start"""
 
                 def process = cmd.execute()
                 SystemClock clock = SystemClock.instance()
@@ -172,20 +170,12 @@ class Repose {
                 }
 
                 //6 log
-                println "request headers passed into filter: $request_headers"
-                println "request url: $url"
-                println "request method: $method"
-                println "request body: $bodyMessage"
-                println "request class: ${request_headers.getClass()}"
                 def mc = deproxy.makeRequest(
                         "http://localhost:8888" + url,
                         method,
                         request_headers,
                         bodyMessage
                 )
-
-                println "number of handlings: ${mc.handlings.size()}"
-                println "number of orphaned handlings: ${mc.orphanedHandlings.size()}"
 
                 def handling_requests = null
 
@@ -305,7 +295,7 @@ class Repose {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         DocumentBuilder builder = factory.newDocumentBuilder();
 
-        Document doc = builder.parse("/Users/dimi5963/projects/try_repose/imported_configs/system-model.cfg.xml");
+        Document doc = builder.parse("${System.getProperty("user.dir")}/imported_configs/system-model.cfg.xml");
 
         NodeList nodeList = doc.getElementsByTagName("filter");
         for (int i = 0; i < nodeList.getLength(); i++) {
