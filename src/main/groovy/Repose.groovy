@@ -32,7 +32,19 @@ class Repose {
             'content-normalization' : 'content-normalization.cfg.xml',
             'header-normalization' : 'header-normalization.cfg.xml',
             'uri-normalization' : 'uri-normalization.cfg.xml',
-            'client-auth' : 'client-auth-n.cfg.xml'
+            'client-auth' : 'client-auth-n.cfg.xml',
+            'compression' : 'compression.cfg.xml',
+            'destination-router' : 'destination-router.cfg.xml',
+            'header-id-mapping' : 'header-id-mapping.cfg.xml',
+            'http-logging' : 'http-logging.cfg.xml',
+            'ip-identity' : 'ip-identity.cfg.xml',
+            'rate-limiting' : 'rate-limiting.cfg.xml',
+            'service-authentication' : 'service-authentication.cfg.xml',
+            'translation' : 'translation.cfg.xml',
+            'url-identity' : 'url-identity.cfg.xml',
+            'uri-stripper' : 'uri-stripper.cfg.xml',
+            'validator' : 'validator.cfg.xml',
+            'versioning' : 'versioning.cfg.xml'
     ]
 
     /**
@@ -147,9 +159,21 @@ class Repose {
                     repose.configurationMap[filter.name] == it.name
                 }
 
+                new File("${System.getProperty("user.dir")}/imported_configs/").listFiles().findAll {
+                    it.name.contains(".xsl")
+                }.each {
+
+                    FileUtils.copyFile(
+                            it,
+                            new File("${System.getProperty("user.dir")}/repose_home/configs/${it.name}")
+                    )
+                }
+
                 FileUtils.copyFile(
                         filterFile,
                         new File("${System.getProperty("user.dir")}/repose_home/configs/${repose.configurationMap[filter.name]}"))
+
+
 
                 //#5
                 Deproxy deproxy = new Deproxy()
@@ -168,6 +192,8 @@ class Repose {
                     } catch (ClientProtocolException ignored) {
                     }
                 }
+
+                sleep(5000)
 
                 //6 log
                 def mc = deproxy.makeRequest(
