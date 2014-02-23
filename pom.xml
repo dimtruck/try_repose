@@ -61,8 +61,8 @@
 
         <dependency>
             <groupId>org.rackspace</groupId>
-            <artifactId>gdeproxy</artifactId>
-            <version>0.16</version>
+            <artifactId>deproxy</artifactId>
+            <version>0.18</version>
         </dependency>
     </dependencies>
 
