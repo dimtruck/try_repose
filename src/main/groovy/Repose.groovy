@@ -7,11 +7,12 @@ import org.apache.http.client.HttpClient
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.DefaultHttpClient
 import org.linkedin.util.clock.SystemClock
+import org.rackspace.deproxy.Handling
+import org.rackspace.deproxy.MessageChain
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
-import org.rackspace.gdeproxy.Deproxy;
-import org.json.JSONObject
+import org.rackspace.deproxy.Deproxy
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -28,7 +29,7 @@ import static org.linkedin.groovy.util.concurrent.GroovyConcurrentUtils.waitForC
  * Time: 5:08 PM
  */
 class Repose {
-    private Map<String, String> configurationMap = [
+    Map configurationMap = [
             'content-normalization' : 'content-normalization.cfg.xml',
             'header-normalization' : 'header-normalization.cfg.xml',
             'uri-normalization' : 'uri-normalization.cfg.xml',
@@ -47,294 +48,282 @@ class Repose {
             'versioning' : 'versioning.cfg.xml'
     ]
 
-    /**
-     * returns {
-     *   'request': METHOD uri [header1,header2] body
-     *   'filters':[
-     *       'filter':{
-     *           'name':'filter.xml',
-     *           'request': METHOD uri [header1,header2] body,
-     *           'internal': [
-     *               METHOD uri [header1,header2] body,
-     *               METHOD uri [header1,header2] body
-     *           ],
-     *           'response': json/xml
-     *       },
-     *       'filter':{
-     *           'name':'filter.xml',
-     *           'request': METHOD uri [header1,header2] body,
-     *           'internal': [
-     *               METHOD uri [header1,header2] body,
-     *               METHOD uri [header1,header2] body
-     *           ],
-     *           'response': json/xml
-     *       }
-     *   ],
-     *   'response': json/xml
-     * }
-     * @param args
-     */
-    static void main(String[] args){
-        //initial request
-        String url = args[1]
-        String method = args[0]
-        String headers = args[2]
-        String bodyMessage = args[3]
+    def run(String method, String uri, Map headers, String body){
+        def repose_output = getRoot(method, uri, headers, body)
+        for(Filter filter: retrieveFilterList()) {
+            cleanTargetConfigDirectory()
+            copyCommonConfigsIntoTargetDirectory()
+            setupContainerConfiguration()
+            //only for one target right now!
+            setupSystemModelConfiguration(filter)
+            setupFilterConfiguration(filter)
+            Deproxy deproxy = new Deproxy()
+            def process
+            try{
+                process = startRepose(deproxy)
+                println "$uri, $method, $headers,$body"
+                MessageChain mc = makeRequest(deproxy, uri, method, headers, body)
+                def handlings = getHandlings(mc)
+                def request_headers_map = [:]
+                if(handlings){
+                    def result = updateHandlingResults(handlings, filter, repose_output)
+                    request_headers_map = result['request_headers_map']
+                    repose_output = result['output']
+                }else{
+                    repose_output = updateHandlingResultsWithError(mc, filter, getResponseMap(mc), repose_output)
+                    break
+                }
+                repose_output = updateResults(mc, getResponseMap(mc), repose_output)
+                validateChainIsValid(handlings)
+                uri = handlings[handlings.size() - 1].request.path
+                method = handlings[handlings.size() - 1].request.method
+                headers = request_headers_map
+                body = handlings[handlings.size() - 1].request.body
 
-        JsonSlurper slurper = new JsonSlurper()
+            }finally{
+                stopRepose(deproxy, process)
+            }
+        }
+
+        print repose_output
+    }
+
+    private def getRoot(String method, String uri, Map headers, String body){
         JsonBuilder json = new JsonBuilder()
-
-        def request_headers = slurper.parseText(headers)
-
-        //1. upload configuration list
-        //2. get system-model.cfg.xml and retrieve all filters
-        //3. for each filter
-        //4.   set up configuration
-        //5.   start repose
-        //6.   log:
-        //       - request
-        //       - response
-        //       - handling list
-        //       - orphaned handling list
-        //7.   stop repose
-        //8.   set request to response
-        //9.   repeat steps 4-8 until no filters are left
-        Repose repose = new Repose();
-        def root = json.repose {
+        return json.repose {
             request (
                     method: method,
-                    url: url,
-                    headers: request_headers,
-                    body: bodyMessage
+                    url: uri,
+                    headers: headers,
+                    body: body
             )
             filters ([])
         }
-        println System.getProperty("user.dir");
-        try{
-            //#2
-            repose.retrieveFilterList();
-            //#3
-            for(Filter filter : repose.retrieveFilterList()){
-                new File("${System.getProperty("user.dir")}/repose_home/configs").eachFile {
-                    it.delete()
-                }
-
-                //#4 - to set up configuration, you need the following:
-                //container.cfg.xml
-                FileUtils.copyDirectory(
-                        new File("${System.getProperty("user.dir")}/common_configs"),
-                        new File("${System.getProperty("user.dir")}/repose_home/configs"))
-                File systemModel = new File(
-                        "${System.getProperty("user.dir")}/repose_home/configs/system-model.cfg.xml")
-                systemModel << '<?xml version="1.0" encoding="UTF-8"?>\n' +
-                        '\n' +
-                        '<!-- To configure Repose see: http://wiki.openrepose.org/display/REPOSE/Configuration -->\n' +
-                        '<system-model xmlns="http://docs.rackspacecloud.com/repose/system-model/v2.0">\n' +
-                        '  <repose-cluster id="repose" rewrite-host-header="false">\n' +
-                        '    <nodes>\n' +
-                        '        <node id="node1" hostname="localhost" http-port="8888"/>\n' +
-                        '    </nodes>\n' +
-                        '    <filters>\n'
-
-                systemModel << "<filter name=\"${filter.name}\" "
-
-                if (filter.configPath != null) {
-                    systemModel << " configuration=\"${filter.configPath}\" "
-                }
-
-                if (filter.uriRegex != null) {
-                    systemModel << " uri-regex=\"${filter.uriRegex}\" "
-                }
-
-                systemModel << '/>\n' +
-                        '    </filters>\n' +
-                        '    <destinations>\n' +
-                        '      <!-- Update this endpoint if you want Repose to send requests to a different service -->\n' +
-                        '        <endpoint id="target" protocol="http" hostname="localhost" root-path="/" port="10001" default="true" />\n' +
-                        '    </destinations>\n' +
-                        '  </repose-cluster>\n' +
-                        '</system-model>'
-
-                File filterFile = new File("${System.getProperty("user.dir")}/imported_configs/").listFiles().find {
-                    repose.configurationMap[filter.name] == it.name
-                }
-
-                new File("${System.getProperty("user.dir")}/imported_configs/").listFiles().findAll {
-                    it.name.contains(".xsl")
-                }.each {
-
-                    FileUtils.copyFile(
-                            it,
-                            new File("${System.getProperty("user.dir")}/repose_home/configs/${it.name}")
-                    )
-                }
-
-                FileUtils.copyFile(
-                        filterFile,
-                        new File("${System.getProperty("user.dir")}/repose_home/configs/${repose.configurationMap[filter.name]}"))
-
-
-
-                //#5
-                Deproxy deproxy = new Deproxy()
-                deproxy.addEndpoint(10001)
-
-                def cmd = """java -jar ${System.getProperty("user.dir")}/usr/share/repose/repose-valve.jar -c ${System.getProperty("user.dir")}/repose_home/configs/ -s 7777 start"""
-
-                def process = cmd.execute()
-                SystemClock clock = SystemClock.instance()
-
-                waitForCondition(clock, "60s", "1s") {
-                    try {
-                        HttpClient client = new DefaultHttpClient()
-                        client.execute(new HttpGet("http://localhost:8888")).statusLine.statusCode != 500
-                    } catch (IOException ignored) {
-                    } catch (ClientProtocolException ignored) {
-                    }
-                }
-
-                sleep(5000)
-
-                //6 log
-                def mc = deproxy.makeRequest(
-                        "http://localhost:8888" + url,
-                        method,
-                        request_headers,
-                        bodyMessage
-                )
-
-                def handling_requests = null
-
-                if(mc.handlings.size() == 0 && mc.orphanedHandlings.size() > 0){
-                    handling_requests = mc.orphanedHandlings
-                } else if(mc.handlings.size() > 0) {
-                    handling_requests = mc.handlings
-                }
-
-                Map response_map = [:]
-                mc.receivedResponse.headers.get_headers().collect {
-                    header ->
-                        response_map.putAt(header.name.toString(), header.value.toString())
-                }
-
-                Map request_headers_map = [:]
-
-                if(handling_requests){
-                    handling_requests[handling_requests.size() - 1].request.headers.get_headers().collect {
-                        header ->
-                            if(!header.name.equals("deproxy-request-id"))
-                                request_headers_map.putAt(header.name.toString(), header.value.toString())
-                    }
-
-                    handling_requests.each {
-                        handling ->
-                            root['repose']['filters'].add(json.filter {
-                                name filter.name
-                                content_sent_from_filter (
-                                        method: handling.request.method,
-                                        url: handling.request.path,
-                                        headers: request_headers_map,
-                                        body: handling.request.body
-                                )
-                            })
-                    }
-                } else {
-                    root['repose'].putAt(
-                            "response",
-                            [
-                                    'headers': response_map,
-                                    'body': mc.receivedResponse.body,
-                                    'message': mc.receivedResponse.message,
-                                    'code': mc.receivedResponse.code,
-                                    'filter_failed_on': filter.name
-                            ])
-                    deproxy.shutdown()
-                    try {
-
-                        Socket s = new Socket()
-                        s.setSoTimeout(5000)
-                        s.connect(new InetSocketAddress("localhost", 7777), 5000)
-                        s.outputStream.write("\r\n".getBytes(Charset.forName("US-ASCII")))
-                        s.outputStream.flush()
-                        s.close()
-
-                        waitForCondition(clock, "60s", '1s', {
-                            !repose.isUp()
-                        })
-
-                    } catch (Exception) {
-                        process.waitForOrKill(5000)
-                        throw new TimeoutException("Repose failed to stop cleanly")
-                    }
-
-                    break
-
-                }
-
-                root['repose'].putAt(
-                        "response",
-                        [
-                                'headers': response_map,
-                                'body': mc.receivedResponse.body,
-                                'message': mc.receivedResponse.message,
-                                'code': mc.receivedResponse.code
-                        ])
-
-                assert Integer.parseInt(handling_requests[handling_requests.size() - 1].response.code) < 400
-                url = handling_requests[handling_requests.size() - 1].request.path
-                method = handling_requests[handling_requests.size() - 1].request.method
-                request_headers = request_headers_map
-                bodyMessage = handling_requests[handling_requests.size() - 1].request.body
-
-
-                deproxy.shutdown()
-                try {
-
-                    Socket s = new Socket()
-                    s.setSoTimeout(5000)
-                    s.connect(new InetSocketAddress("localhost", 7777), 5000)
-                    s.outputStream.write("\r\n".getBytes(Charset.forName("US-ASCII")))
-                    s.outputStream.flush()
-                    s.close()
-
-                    waitForCondition(clock, "60s", '1s', {
-                        !repose.isUp()
-                    })
-
-                } catch (Exception) {
-                    process.waitForOrKill(5000)
-                    throw new TimeoutException("Repose failed to stop cleanly")
-                }
-            }
-        }catch (Exception e){
-            e.printStackTrace();
-        } finally{
-            println JsonOutput.prettyPrint(JsonOutput.toJson(root))
-        }
-
-
     }
 
-    private List<Filter> retrieveFilterList()
-    throws ParserConfigurationException, IOException, SAXException, XPathExpressionException{
-        List<Filter> filterList = new ArrayList<Filter>();
+    private def cleanTargetConfigDirectory(){
+        new File("${System.getProperty("user.dir")}/repose_home/configs").eachFile {
+            it.delete()
+        }
+    }
+
+    private def copyCommonConfigsIntoTargetDirectory(){
+        FileUtils.copyDirectory(
+                new File("${System.getProperty("user.dir")}/common_configs"),
+                new File("${System.getProperty("user.dir")}/repose_home/configs"))
+    }
+
+    private def setupSystemModelConfiguration(Filter filter){
+        File systemModel = new File(
+                "${System.getProperty("user.dir")}/repose_home/configs/system-model.cfg.xml")
+        systemModel << '<?xml version="1.0" encoding="UTF-8"?>\n' +
+                '\n' +
+                '<!-- To configure Repose see: http://wiki.openrepose.org/display/REPOSE/Configuration -->\n' +
+                '<system-model xmlns="http://docs.rackspacecloud.com/repose/system-model/v2.0">\n' +
+                '  <repose-cluster id="repose" rewrite-host-header="false">\n' +
+                '    <nodes>\n' +
+                '        <node id="node1" hostname="localhost" http-port="8888"/>\n' +
+                '    </nodes>\n' +
+                '    <filters>\n'
+
+        systemModel << "<filter name=\"${filter.name}\" "
+
+        if (filter.configPath != null) {
+            systemModel << " configuration=\"${filter.configPath}\" "
+        }
+
+        if (filter.uriRegex != null) {
+            systemModel << " uri-regex=\"${filter.uriRegex}\" "
+        }
+
+        systemModel << '/>\n' +
+                '    </filters>\n' +
+                '    <destinations>\n' +
+                '      <!-- Update this endpoint if you want Repose to send requests to a different service -->\n' +
+                '        <endpoint id="target" protocol="http" hostname="localhost" root-path="/" port="10001" default="true" />\n' +
+                '    </destinations>\n' +
+                '  </repose-cluster>\n' +
+                '</system-model>'
+
+        return systemModel
+    }
+
+    private def setupContainerConfiguration(){
+        def container = new File(
+                "${System.getProperty("user.dir")}/repose_home/configs/container.cfg.xml")
+        container.write "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                "\n" +
+                "<repose-container xmlns='http://docs.rackspacecloud.com/repose/container/v2.0'>\n" +
+                "  <deployment-config client-request-logging=\"true\">\n" +
+                "     <deployment-directory auto-clean=\"true\">${System.getProperty("user.dir")}/repose_home/deployments</deployment-directory>" +
+                "     <artifact-directory check-interval=\"1000\">${System.getProperty("user.dir")}/usr/share/repose/filters</artifact-directory>" +
+                "     <logging-configuration href=\"log4j.properties\" />" +
+                "  </deployment-config>" +
+                "</repose-container>"
+
+        return container
+    }
+
+    private def setupFilterConfiguration(Filter filter){
+        File filterFile = new File("${System.getProperty("user.dir")}/imported_configs/").listFiles().find {
+            configurationMap[filter.name] == it.name
+        }
+
+        new File("${System.getProperty("user.dir")}/imported_configs/").listFiles().findAll {
+            it.name.contains(".xsl")
+        }.each {
+
+            FileUtils.copyFile(
+                    it,
+                    new File("${System.getProperty("user.dir")}/repose_home/configs/${it.name}")
+            )
+        }
+
+        FileUtils.copyFile(
+                filterFile,
+                new File("${System.getProperty("user.dir")}/repose_home/configs/${configurationMap[filter.name]}"))
+    }
+
+    private def startRepose(Deproxy deproxy){
+        deproxy.addEndpoint(10001)
+
+        def cmd = """java -jar ${System.getProperty("user.dir")}/usr/share/repose/repose-valve.jar -c ${System.getProperty("user.dir")}/repose_home/configs/ -s 7777 start"""
+        def process = cmd.execute()
+        SystemClock clock = SystemClock.instance()
+
+        waitForCondition(clock, "60s", "3s") {
+            try {
+                HttpClient client = new DefaultHttpClient()
+                client.execute(new HttpGet("http://localhost:8888")).statusLine.statusCode != 500
+            } catch (IOException ignored) {
+            } catch (ClientProtocolException ignored) {
+            }
+        }
+        return process
+    }
+
+    //DANGER!  WILL KILL ALL JAVA PROCESSES!  ONLY RUN ON A SANDBOX!
+    private def stopRepose(Deproxy deproxy, Process process){
+        deproxy.shutdown()
+        try {
+            SystemClock clock = SystemClock.instance()
+            Socket s = new Socket()
+            s.setSoTimeout(5000)
+            s.connect(new InetSocketAddress("localhost", 7777), 5000)
+            s.outputStream.write("\r\n".getBytes(Charset.forName("US-ASCII")))
+            s.outputStream.flush()
+            s.close()
+
+            waitForCondition(clock, "60s", '1s', {
+                !isUp()
+            })
+
+        } catch (Exception) {
+            process.waitForOrKill(5000)
+            def execution = "killall java"
+            println execution
+            def proc = """${execution}""".execute()
+        }
+    }
+
+    private def makeRequest(Deproxy deproxy, String uri, String method, Map headers, String body){
+        println "$uri, $method, $headers,$body"
+        return deproxy.makeRequest(
+                url: "http://localhost:8888" + uri,
+                method: method,
+                headers: headers,
+                requestBody: body
+        )
+    }
+
+    private def getHandlings(MessageChain mc){
+        if(mc.handlings.size() == 0 && mc.orphanedHandlings.size() > 0){
+            return mc.orphanedHandlings
+        } else if(mc.handlings.size() > 0) {
+            return mc.handlings
+        }
+        return null
+    }
+
+    private def getResponseMap(MessageChain mc){
+        Map response_map = [:]
+        mc.receivedResponse.headers.get_headers().collect {
+            header ->
+                response_map.putAt(header.name.toString(), header.value.toString())
+        }
+        return response_map
+    }
+
+    private def updateHandlingResults(List<Handling> handling_requests, Filter filter, output){
+        JsonBuilder json = new JsonBuilder()
+        Map request_headers_map = [:]
+        handling_requests[handling_requests.size() - 1].request.headers.get_headers().collect {
+            header ->
+                if(!header.name.equals("deproxy-request-id"))
+                    request_headers_map.putAt(header.name.toString(), header.value.toString())
+        }
+
+        handling_requests.each {
+            handling ->
+                output['repose']['filters'].add(json.filter {
+                    name filter.name
+                    content_sent_from_filter (
+                            method: handling.request.method,
+                            url: handling.request.path,
+                            headers: request_headers_map,
+                            body: handling.request.body
+                    )
+                })
+        }
+        return [output: output, request_headers_map: request_headers_map]
+    }
+
+    private def updateHandlingResultsWithError(MessageChain mc, Filter filter, Map response_map, output){
+        output['repose'].putAt(
+                "response",
+                [
+                        'headers': response_map,
+                        'body': mc.receivedResponse.body,
+                        'message': mc.receivedResponse.message,
+                        'code': mc.receivedResponse.code,
+                        'filter_failed_on': filter.name
+                ])
+        return output;
+    }
+
+    private def updateResults(MessageChain mc, Map response_map, output){
+        output['repose'].putAt(
+                "response",
+                [
+                        'headers': response_map,
+                        'body': mc.receivedResponse.body,
+                        'message': mc.receivedResponse.message,
+                        'code': mc.receivedResponse.code
+                ])
+        return output
+    }
+
+    private def validateChainIsValid(handling_requests){
+        assert Integer.parseInt(handling_requests[handling_requests.size() - 1].response.code) < 400
+    }
+
+    private def retrieveFilterList() {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         DocumentBuilder builder = factory.newDocumentBuilder();
 
         Document doc = builder.parse("${System.getProperty("user.dir")}/imported_configs/system-model.cfg.xml");
 
         NodeList nodeList = doc.getElementsByTagName("filter");
-        for (int i = 0; i < nodeList.getLength(); i++) {
-            String path = nodeList.item(i).getAttributes().getNamedItem("configuration") != null ?
-                nodeList.item(i).getAttributes().getNamedItem("configuration").getNodeValue() :
+        return nodeList.collect {
+            String path = it.getAttributes().getNamedItem("configuration") != null ?
+                it.getAttributes().getNamedItem("configuration").getNodeValue() :
                 null;
-            String regex = nodeList.item(i).getAttributes().getNamedItem("uri-regex") != null ?
-                nodeList.item(i).getAttributes().getNamedItem("uri-regex").getNodeValue() :
+            String regex = it.getAttributes().getNamedItem("uri-regex") != null ?
+                it.getAttributes().getNamedItem("uri-regex").getNodeValue() :
                 null;
-            String name = nodeList.item(i).getAttributes().getNamedItem("name").getNodeValue();
-            filterList.add(new Filter(name, path, regex));
+            String name = it.getAttributes().getNamedItem("name").getNodeValue();
+            new Filter(name: name, configPath: path, uriRegex: regex)
         }
-        return filterList;
     }
 
 
