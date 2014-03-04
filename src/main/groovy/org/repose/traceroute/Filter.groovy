@@ -1,3 +1,5 @@
+package org.repose.traceroute
+
 import groovy.transform.EqualsAndHashCode
 
 /**

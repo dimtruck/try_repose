@@ -1,3 +1,5 @@
+package org.repose.traceroute
+
 import groovy.json.JsonException
 import groovy.json.JsonSlurper
 import org.xml.sax.SAXException

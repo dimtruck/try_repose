@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" ng-app="phonecatApp"> <!-- loads ngApp directive; allows to treat different portions of html as angular apps or the entire thing-->
+<head>
+  <meta charset="utf-8">
+  <title>My HTML File</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/bootstrap.css">
+  <link rel="stylesheet" href="http://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap-wizard/1.0.0/css/bootstrap.css">
+  <script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/jquery/2.0.0/jquery.js"></script>
+  <script src="http://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap-wizard/1.0.0/js/bootstrap.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.2.14/angular.min.js"></script>
+  <script src="js/controllers.js"></script>
+</head>
+<body>
+<form ng-switch="navStep" class="main">
+    <!--STEP 1 -->
+    <div ng-switch-when="activity_info" activity-wizard-step title="Class Activity Info" description="Add all info about the activity" src="resources/angular/templates/activity_wizard/activity_info.html" step-number="1"></div>
+
+    <!-- STEP 2 -->
+    <div ng-switch-when="add_class" activity-wizard-step title="Add Class(es)" description="dd Instructor-Led-Training (ILT) Classes below. It can be a classroom ILT or a Webinar ILT and contain 1 or more sessions." src="resources/angular/templates/activity_wizard/add_class.html" step-number="2"></div>
+
+</form>
+<div class="wizard" id="some-wizard" data-title="Wizard Title"></div><div class="container-fluid">
+  <div  ng-controller="PhoneListCtrl">
+    <div class="row-fluid">
+      <div class="span2">
+        <!--Sidebar content-->
+
+        Search: <input ng-model="query">
+
+      </div>
+      <div class="span10">
+        <!--Body content-->
+
+        <ul class="phones">
+          <li ng-repeat="phone in phones | filter:query">
+            {{phone.name}}
+            <p>{{phone.snippet}}</p>
+          </li>
+        </ul>
+
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

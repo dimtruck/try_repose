@@ -1,27 +1,24 @@
+package org.repose.traceroute
+
 import groovy.json.JsonBuilder
-import groovy.json.JsonSlurper
-import groovy.json.JsonOutput
 import org.apache.commons.io.FileUtils
 import org.apache.http.client.ClientProtocolException
 import org.apache.http.client.HttpClient
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.DefaultHttpClient
 import org.linkedin.util.clock.SystemClock
-import org.rackspace.deproxy.Handling
-import org.rackspace.deproxy.MessageChain
-import org.w3c.dom.Document;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
 import org.rackspace.deproxy.Deproxy
+import org.rackspace.deproxy.Handling
+import org.rackspace.deproxy.HeaderCollection
+import org.rackspace.deproxy.MessageChain
+import org.w3c.dom.Document
+import org.w3c.dom.NodeList
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.xpath.*;
-import java.nio.charset.Charset;
-import java.util.concurrent.TimeoutException
+import javax.xml.parsers.DocumentBuilder
+import javax.xml.parsers.DocumentBuilderFactory
+import java.nio.charset.Charset
 
-import static org.linkedin.groovy.util.concurrent.GroovyConcurrentUtils.waitForCondition;
+import static org.linkedin.groovy.util.concurrent.GroovyConcurrentUtils.waitForCondition
 
 /**
  * User: dimi5963
@@ -48,7 +45,7 @@ class Repose {
             'versioning' : 'versioning.cfg.xml'
     ]
 
-    def run(String method, String uri, Map headers, String body){
+    def  run(String method, String uri, Map headers, String body){
         def repose_output = getRoot(method, uri, headers, body)
         for(Filter filter: retrieveFilterList()) {
             cleanTargetConfigDirectory()
@@ -61,7 +58,6 @@ class Repose {
             def process
             try{
                 process = startRepose(deproxy)
-                println "$uri, $method, $headers,$body"
                 MessageChain mc = makeRequest(deproxy, uri, method, headers, body)
                 def handlings = getHandlings(mc)
                 def request_headers_map = [:]
@@ -77,7 +73,8 @@ class Repose {
                 validateChainIsValid(handlings)
                 uri = handlings[handlings.size() - 1].request.path
                 method = handlings[handlings.size() - 1].request.method
-                headers = request_headers_map
+                headers.clear()
+                headers.putAll(request_headers_map)
                 body = handlings[handlings.size() - 1].request.body
 
             }finally{
@@ -85,7 +82,7 @@ class Repose {
             }
         }
 
-        print repose_output
+        return repose_output
     }
 
     private def getRoot(String method, String uri, Map headers, String body){
@@ -188,6 +185,7 @@ class Repose {
         deproxy.addEndpoint(10001)
 
         def cmd = """java -jar ${System.getProperty("user.dir")}/usr/share/repose/repose-valve.jar -c ${System.getProperty("user.dir")}/repose_home/configs/ -s 7777 start"""
+        println "java -jar ${System.getProperty("user.dir")}/usr/share/repose/repose-valve.jar -c ${System.getProperty("user.dir")}/repose_home/configs/ -s 7777 start"
         def process = cmd.execute()
         SystemClock clock = SystemClock.instance()
 
@@ -228,6 +226,7 @@ class Repose {
 
     private def makeRequest(Deproxy deproxy, String uri, String method, Map headers, String body){
         println "$uri, $method, $headers,$body"
+        println "results: $headers.getClass()"
         return deproxy.makeRequest(
                 url: "http://localhost:8888" + uri,
                 method: method,
@@ -256,11 +255,18 @@ class Repose {
 
     private def updateHandlingResults(List<Handling> handling_requests, Filter filter, output){
         JsonBuilder json = new JsonBuilder()
-        Map request_headers_map = [:]
+        HashMap request_headers_map = new HashMap()
         handling_requests[handling_requests.size() - 1].request.headers.get_headers().collect {
             header ->
-                if(!header.name.equals("deproxy-request-id"))
+                if(!header.name.equals("deproxy-request-id") &&
+                        !header.name.equals("via") &&
+                        !header.name.equals("host") &&
+                        !header.name.equals("user-agent") &&
+                        !header.name.equals("Transfer-Encoding") &&
+                        !header.name.equals("Connection")
+                ){
                     request_headers_map.putAt(header.name.toString(), header.value.toString())
+                }
         }
 
         handling_requests.each {
